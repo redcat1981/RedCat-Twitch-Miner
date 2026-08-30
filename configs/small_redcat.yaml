@@ -1,0 +1,36 @@
+# RedCat Twitch Miner 2.0
+# Account-specific configuration.
+
+streamers:
+  - username: "v_craken_v"
+    enabled: true
+    claim_drops: true
+    claim_moments: true
+    make_predictions: false
+    follow_raid: true
+    community_goals: false
+    watch_streak: true
+
+  - username: "fenriscreations"
+    enabled: true
+    claim_drops: true
+    claim_moments: true
+    make_predictions: false
+    follow_raid: true
+    community_goals: false
+    watch_streak: true
+
+followers:
+  enabled: false
+
+redcat:
+  statistics:
+    enabled: true
+    path: "data/statistics.json"
+    daily_history: true
+
+  raid_shutdown:
+    enabled: true
+    only_after_raid: true
+    grace_period_seconds: 60
+    require_all_target_channels_offline: true
