@@ -7,7 +7,7 @@ UPSTREAM = ROOT / "upstream"
 def replace(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     if old not in text:
-        raise SystemExit(f"Integration anchor not found: {path}: {old[:120]!r}")
+        raise SystemExit(f"Integration anchor not found: {path}: {old[:160]!r}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
@@ -39,7 +39,35 @@ replace(
 \tg, ctx := errgroup.WithContext(ctx)
 ''',
     '''\tparentCtx := ctx
-\n\t// RedCat uses a child context so delayed raid shutdown participates in the\n\t// existing errgroup lifecycle instead of terminating the process abruptly.\n\trunCtx, runCancel := context.WithCancel(ctx)\n\tdefer runCancel()\n\n\tredcatTargets := make([]string, 0, len(m.getStreamers()))\n\tfor _, s := range m.getStreamers() {\n\t\tredcatTargets = append(redcatTargets, s.Username)\n\t}\n\tm.redcatShutdown = redcat.NewRaidShutdownManager(\n\t\tredcatTargets,\n\t\tredcat.RaidShutdownConfig{\n\t\t\tEnabled:                         true,\n\t\t\tOnlyAfterRaid:                   true,\n\t\t\tGracePeriod:                     60 * time.Second,\n\t\t\tRequireAllTargetChannelsOffline: true,\n\t\t},\n\t\trunCancel,\n\t)\n\n\tvar statsErr error\n\tm.redcatStats, statsErr = redcat.NewStatsStore("data/redcat/statistics.json")\n\tif statsErr != nil {\n\t\tm.log.Warn("Failed to initialize RedCat statistics", "error", statsErr)\n\t}\n\n\tg, ctx := errgroup.WithContext(runCtx)\n''',
+
+\t// RedCat uses a child context so delayed raid shutdown participates in the
+\t// existing errgroup lifecycle instead of terminating the process abruptly.
+\trunCtx, runCancel := context.WithCancel(ctx)
+\tdefer runCancel()
+
+\tredcatTargets := make([]string, 0, len(m.getStreamers()))
+\tfor _, s := range m.getStreamers() {
+\t\tredcatTargets = append(redcatTargets, s.Username)
+\t}
+\tm.redcatShutdown = redcat.NewRaidShutdownManager(
+\t\tredcatTargets,
+\t\tredcat.RaidShutdownConfig{
+\t\t\tEnabled:                         true,
+\t\t\tOnlyAfterRaid:                   true,
+\t\t\tGracePeriod:                     60 * time.Second,
+\t\t\tRequireAllTargetChannelsOffline: true,
+\t\t},
+\t\trunCancel,
+\t)
+
+\tvar statsErr error
+\tm.redcatStats, statsErr = redcat.NewStatsStore("data/redcat/statistics.json")
+\tif statsErr != nil {
+\t\tm.log.Warn("Failed to initialize RedCat statistics", "error", statsErr)
+\t}
+
+\tg, ctx := errgroup.WithContext(runCtx)
+''',
 )
 
 replace(
@@ -49,8 +77,33 @@ replace(
 )
 replace(
     handler,
-    '''\t\tevent := mapReasonToEvent(reasonCode)\n\t\tm.log.Event(ctx, event,\n''',
-    '''\t\tevent := mapReasonToEvent(reasonCode)\n\t\tif m.redcatStats != nil {\n\t\t\tvar reason redcat.PointReason\n\t\t\tswitch event {\n\t\t\tcase model.EventGainForWatch:\n\t\t\t\treason = redcat.PointWatch\n\t\t\tcase model.EventGainForClaim:\n\t\t\t\treason = redcat.PointClaim\n\t\t\tcase model.EventGainForWatchStreak:\n\t\t\t\treason = redcat.PointWatchStreak\n\t\t\tcase model.EventGainForRaid:\n\t\t\t\treason = redcat.PointRaid\n\t\t\t}\n\t\t\tif reason != "" {\n\t\t\t\tif err := m.redcatStats.AddPoints(streamer.Username, reason, earned, time.Now()); err != nil {\n\t\t\t\t\tm.log.Warn("Failed to save RedCat point statistics", "error", err)\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tif event == model.EventGainForRaid && m.redcatShutdown != nil {\n\t\t\tm.redcatShutdown.OnRaidPointsReceived()\n\t\t}\n\t\tm.log.Event(ctx, event,\n''',
+    '''\t\t\tevent := mapReasonToEvent(reasonCode)
+\t\t\tm.log.Event(ctx, event,
+''',
+    '''\t\t\tevent := mapReasonToEvent(reasonCode)
+\t\t\tif m.redcatStats != nil {
+\t\t\t\tvar reason redcat.PointReason
+\t\t\t\tswitch event {
+\t\t\t\tcase model.EventGainForWatch:
+\t\t\t\t\treason = redcat.PointWatch
+\t\t\t\tcase model.EventGainForClaim:
+\t\t\t\t\treason = redcat.PointClaim
+\t\t\t\tcase model.EventGainForWatchStreak:
+\t\t\t\t\treason = redcat.PointWatchStreak
+\t\t\t\tcase model.EventGainForRaid:
+\t\t\t\t\treason = redcat.PointRaid
+\t\t\t\t}
+\t\t\t\tif reason != "" {
+\t\t\t\t\tif err := m.redcatStats.AddPoints(username, reason, earned, time.Now()); err != nil {
+\t\t\t\t\t\tm.log.Warn("Failed to save RedCat point statistics", "error", err)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tif event == model.EventGainForRaid && m.redcatShutdown != nil {
+\t\t\t\tm.redcatShutdown.OnRaidPointsReceived()
+\t\t\t}
+\t\t\tm.log.Event(ctx, event,
+''',
 )
 
 print("RedCat integration applied successfully.")
