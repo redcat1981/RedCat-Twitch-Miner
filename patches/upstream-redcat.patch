@@ -1,0 +1,34 @@
+diff --git a/internal/miner/miner.go b/internal/miner/miner.go
+--- a/internal/miner/miner.go
++++ b/internal/miner/miner.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/Guliveer/twitch-miner-go/internal/pubsub"
++	"github.com/redcat1981/RedCat-Twitch-Miner/internal/redcat"
+ 	"github.com/Guliveer/twitch-miner-go/internal/runtimecfg"
+@@ -48,6 +49,8 @@ type Miner struct {
+ 	runtime *runtimecfg.Twitch
++
++	redcatShutdown *redcat.RaidShutdownManager
+ }
+@@ -172,8 +175,23 @@ func (m *Miner) Run(ctx context.Context) error {
+ 	parentCtx := ctx
+-	g, ctx := errgroup.WithContext(ctx)
++
++	// RedCat integration uses a parent cancellation context so a requested
++	// graceful shutdown can terminate the same errgroup used by the miner.
++	runCtx, runCancel := context.WithCancel(ctx)
++	defer runCancel()
++
++	redcatTargets := make([]string, 0, len(m.getStreamers()))
++	for _, s := range m.getStreamers() {
++		redcatTargets = append(redcatTargets, s.Username)
++	}
++	m.redcatShutdown = redcat.NewRaidShutdownManager(redcatTargets, redcat.RaidShutdownConfig{
++		Enabled:                         true,
++		OnlyAfterRaid:                   true,
++		GracePeriod:                     60 * time.Second,
++		RequireAllTargetChannelsOffline: true,
++	})
++
++	g, ctx := errgroup.WithContext(runCtx)
+*** End Patch
