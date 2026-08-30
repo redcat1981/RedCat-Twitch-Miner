@@ -14,10 +14,10 @@ type RaidShutdownConfig struct {
 	RequireAllTargetChannelsOffline bool
 }
 
-// RaidShutdownManager tracks the online state of target channels and arms a
-// delayed shutdown only after a confirmed raid reward has been received.
-// The manager is deliberately independent from Twitch protocol handling so it
-// can be wired into the upstream miner's existing event system.
+// RaidShutdownManager tracks target channel state and arms a delayed,
+// graceful shutdown only after Twitch confirms that raid points were awarded.
+// The shutdown callback is supplied once by the miner lifecycle, avoiding any
+// direct dependency on the upstream Miner type.
 type RaidShutdownManager struct {
 	mu sync.Mutex
 
@@ -27,11 +27,12 @@ type RaidShutdownManager struct {
 	raidPending bool
 	generation  uint64
 
-	cancel context.CancelFunc
+	shutdown func()
+	cancel   context.CancelFunc
 }
 
 // NewRaidShutdownManager creates a manager for the supplied target channels.
-func NewRaidShutdownManager(targets []string, cfg RaidShutdownConfig) *RaidShutdownManager {
+func NewRaidShutdownManager(targets []string, cfg RaidShutdownConfig, shutdown func()) *RaidShutdownManager {
 	if cfg.GracePeriod <= 0 {
 		cfg.GracePeriod = 60 * time.Second
 	}
@@ -42,8 +43,9 @@ func NewRaidShutdownManager(targets []string, cfg RaidShutdownConfig) *RaidShutd
 	}
 
 	return &RaidShutdownManager{
-		targets: states,
-		cfg:     cfg,
+		targets:  states,
+		cfg:      cfg,
+		shutdown: shutdown,
 	}
 }
 
@@ -63,7 +65,7 @@ func (m *RaidShutdownManager) OnStreamerOnline(username string) {
 }
 
 // OnStreamerOffline marks a target channel offline. It does not initiate a
-// shutdown by itself; shutdown is only armed after OnRaidPointsReceived.
+// shutdown by itself; shutdown is only armed after raid points are confirmed.
 func (m *RaidShutdownManager) OnStreamerOffline(username string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -76,12 +78,11 @@ func (m *RaidShutdownManager) OnStreamerOffline(username string) {
 }
 
 // OnRaidPointsReceived confirms that Twitch actually awarded raid points.
-// This is intentionally separate from merely observing a raid-update event.
-func (m *RaidShutdownManager) OnRaidPointsReceived(shutdown func()) {
+func (m *RaidShutdownManager) OnRaidPointsReceived() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.cfg.Enabled || !m.cfg.OnlyAfterRaid {
+	if !m.cfg.Enabled || !m.cfg.OnlyAfterRaid || len(m.targets) == 0 {
 		return
 	}
 
@@ -89,14 +90,15 @@ func (m *RaidShutdownManager) OnRaidPointsReceived(shutdown func()) {
 	m.generation++
 	generation := m.generation
 	m.cancelLocked()
+	m.raidPending = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
-	go m.waitForShutdown(ctx, generation, shutdown)
+	go m.waitForShutdown(ctx, generation)
 }
 
-func (m *RaidShutdownManager) waitForShutdown(ctx context.Context, generation uint64, shutdown func()) {
+func (m *RaidShutdownManager) waitForShutdown(ctx context.Context, generation uint64) {
 	timer := time.NewTimer(m.cfg.GracePeriod)
 	defer timer.Stop()
 
@@ -114,6 +116,7 @@ func (m *RaidShutdownManager) waitForShutdown(ctx context.Context, generation ui
 
 	m.raidPending = false
 	m.cancel = nil
+	shutdown := m.shutdown
 	m.mu.Unlock()
 
 	if shutdown != nil {
