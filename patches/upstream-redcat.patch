@@ -51,7 +51,7 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 diff --git a/internal/miner/handler.go b/internal/miner/handler.go
 --- a/internal/miner/handler.go
 +++ b/internal/miner/handler.go
-@@ -81,6 +81,11 @@ func (m *Miner) handlePointsEarnedOrSpent(ctx context.Context, msg *model.Message, streamer *model.Streamer) {
+@@ -81,6 +81,12 @@ func (m *Miner) handlePointsEarnedOrSpent(ctx context.Context, msg *model.Message, streamer *model.Streamer) {
  			event := mapReasonToEvent(reasonCode)
 +			if event == model.EventGainForRaid && m.redcatShutdown != nil {
 +				m.redcatShutdown.OnRaidPointsReceived(func() {
@@ -62,17 +62,16 @@ diff --git a/internal/miner/handler.go b/internal/miner/handler.go
 +				})
 +			}
  			m.log.Event(ctx, event,
-@@ -142,6 +147,10 @@ func (m *Miner) handleStreamUp(ctx context.Context, streamer *model.Streamer) {
+@@ -142,6 +148,10 @@ func (m *Miner) handleStreamUp(ctx context.Context, streamer *model.Streamer) {
  		"category", category)
 +
 +	if m.redcatShutdown != nil {
 +		m.redcatShutdown.OnStreamerOnline(username)
 +	}
-@@ -158,6 +167,10 @@ func (m *Miner) handleStreamDown(ctx context.Context, streamer *model.Streamer) {
+@@ -158,6 +168,10 @@ func (m *Miner) handleStreamDown(ctx context.Context, streamer *model.Streamer) {
  			"category", category)
  	}
 +
 +	if m.redcatShutdown != nil {
 +		m.redcatShutdown.OnStreamerOffline(username)
 +	}
-*** End Patch
