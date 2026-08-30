@@ -9,15 +9,20 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
  	runtime *runtimecfg.Twitch
 +
 +	redcatShutdown *redcat.RaidShutdownManager
++	redcatRunCancel context.CancelFunc
  }
-@@ -172,8 +175,23 @@ func (m *Miner) Run(ctx context.Context) error {
+@@ -172,8 +175,25 @@ func (m *Miner) Run(ctx context.Context) error {
  	parentCtx := ctx
 -	g, ctx := errgroup.WithContext(ctx)
 +
 +	// RedCat integration uses a parent cancellation context so a requested
 +	// graceful shutdown can terminate the same errgroup used by the miner.
 +	runCtx, runCancel := context.WithCancel(ctx)
-+	defer runCancel()
++	m.redcatRunCancel = runCancel
++	defer func() {
++		m.redcatRunCancel = nil
++		runCancel()
++	}()
 +
 +	redcatTargets := make([]string, 0, len(m.getStreamers()))
 +	for _, s := range m.getStreamers() {
@@ -31,7 +36,7 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 +	})
 +
 +	g, ctx := errgroup.WithContext(runCtx)
-@@ -321,6 +339,13 @@ func (m *Miner) checkAllStreamersOnline(ctx context.Context) {
+@@ -321,6 +341,13 @@ func (m *Miner) checkAllStreamersOnline(ctx context.Context) {
  			streamer.Mu.RUnlock()
 +
 +			if m.redcatShutdown != nil {
@@ -51,9 +56,8 @@ diff --git a/internal/miner/handler.go b/internal/miner/handler.go
 +			if event == model.EventGainForRaid && m.redcatShutdown != nil {
 +				m.redcatShutdown.OnRaidPointsReceived(func() {
 +					m.log.Info("🛑 RedCat raid shutdown condition satisfied")
-+					runCancel := m.redcatRunCancel
-+					if runCancel != nil {
-+						runCancel()
++					if m.redcatRunCancel != nil {
++						m.redcatRunCancel()
 +					}
 +				})
 +			}
