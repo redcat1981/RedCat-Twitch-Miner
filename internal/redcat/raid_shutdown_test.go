@@ -7,14 +7,14 @@ import (
 )
 
 func TestRaidShutdownWhenBothTargetsStayOffline(t *testing.T) {
+	var shutdowns atomic.Int32
 	manager := NewRaidShutdownManager(
 		[]string{"v_craken_v", "fenriscreations"},
 		RaidShutdownConfig{Enabled: true, OnlyAfterRaid: true, GracePeriod: 20 * time.Millisecond, RequireAllTargetChannelsOffline: true},
+		func() { shutdowns.Add(1) },
 	)
 
-	var shutdowns atomic.Int32
-	manager.OnRaidPointsReceived(func() { shutdowns.Add(1) })
-
+	manager.OnRaidPointsReceived()
 	time.Sleep(50 * time.Millisecond)
 
 	if got := shutdowns.Load(); got != 1 {
@@ -23,15 +23,16 @@ func TestRaidShutdownWhenBothTargetsStayOffline(t *testing.T) {
 }
 
 func TestRaidShutdownCancelledWhenTargetReturnsOnline(t *testing.T) {
+	var shutdowns atomic.Int32
 	manager := NewRaidShutdownManager(
 		[]string{"v_craken_v", "fenriscreations"},
 		RaidShutdownConfig{Enabled: true, OnlyAfterRaid: true, GracePeriod: 50 * time.Millisecond, RequireAllTargetChannelsOffline: true},
+		func() { shutdowns.Add(1) },
 	)
 
-	var shutdowns atomic.Int32
 	manager.OnStreamerOffline("v_craken_v")
 	manager.OnStreamerOffline("fenriscreations")
-	manager.OnRaidPointsReceived(func() { shutdowns.Add(1) })
+	manager.OnRaidPointsReceived()
 
 	time.Sleep(10 * time.Millisecond)
 	manager.OnStreamerOnline("fenriscreations")
@@ -43,12 +44,13 @@ func TestRaidShutdownCancelledWhenTargetReturnsOnline(t *testing.T) {
 }
 
 func TestOfflineAloneDoesNotShutdown(t *testing.T) {
+	var shutdowns atomic.Int32
 	manager := NewRaidShutdownManager(
 		[]string{"v_craken_v", "fenriscreations"},
 		RaidShutdownConfig{Enabled: true, OnlyAfterRaid: true, GracePeriod: 20 * time.Millisecond, RequireAllTargetChannelsOffline: true},
+		func() { shutdowns.Add(1) },
 	)
 
-	var shutdowns atomic.Int32
 	manager.OnStreamerOffline("v_craken_v")
 	time.Sleep(40 * time.Millisecond)
 
