@@ -3,7 +3,7 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 +++ b/internal/miner/miner.go
 @@ -25,6 +25,7 @@ import (
  	"github.com/Guliveer/twitch-miner-go/internal/pubsub"
-+	"github.com/redcat1981/RedCat-Twitch-Miner/internal/redcat"
++	"github.com/Guliveer/twitch-miner-go/internal/redcat"
  	"github.com/Guliveer/twitch-miner-go/internal/runtimecfg"
 @@ -48,6 +49,8 @@ type Miner struct {
  	runtime *runtimecfg.Twitch
@@ -31,4 +31,48 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 +	})
 +
 +	g, ctx := errgroup.WithContext(runCtx)
+@@ -321,6 +339,11 @@ func (m *Miner) checkAllStreamersOnline(ctx context.Context) {
+ 			streamer.Mu.RLock()
+ 			isOnline := streamer.IsOnline
+@@
+ 			streamer.Mu.RUnlock()
++
++			if m.redcatShutdown != nil {
++				if isOnline {
++					m.redcatShutdown.OnStreamerOnline(streamer.Username)
++				} else {
++					m.redcatShutdown.OnStreamerOffline(streamer.Username)
++				}
++			}
+*** End Patch
+
+diff --git a/internal/miner/handler.go b/internal/miner/handler.go
+--- a/internal/miner/handler.go
++++ b/internal/miner/handler.go
+@@ -81,6 +81,10 @@ func (m *Miner) handlePointsEarnedOrSpent(ctx context.Context, msg *model.Message, streamer *model.Streamer) {
+ 			event := mapReasonToEvent(reasonCode)
++			if event == model.EventGainForRaid && m.redcatShutdown != nil {
++				m.redcatShutdown.OnRaidPointsReceived(func() {
++					m.log.Info("🛑 RedCat raid shutdown condition satisfied")
++					// The Run() context is cancelled by the integration callback.
++				})
++			}
+ 			m.log.Event(ctx, event,
+@@ -142,6 +146,10 @@ func (m *Miner) handleStreamUp(ctx context.Context, streamer *model.Streamer) {
+ 	m.log.Event(ctx, model.EventStreamerOnline,
+@@
+ 		"category", category)
++
++	if m.redcatShutdown != nil {
++		m.redcatShutdown.OnStreamerOnline(username)
++	}
+@@ -158,6 +166,10 @@ func (m *Miner) handleStreamDown(ctx context.Context, streamer *model.Streamer) {
+ 	if wasOnline {
+@@
+ 			"category", category)
+ 	}
++
++	if m.redcatShutdown != nil {
++		m.redcatShutdown.OnStreamerOffline(username)
++	}
 *** End Patch
