@@ -45,9 +45,10 @@ func NewStatsStore(path string) (*StatsStore, error) {
 	s := &StatsStore{path: path, data: Statistics{
 		ByReason:   make(map[PointReason]int64),
 		ByStreamer: make(map[string]int64),
-		ByDay:       make(map[string]int64),
+		ByDay:      make(map[string]int64),
 	}}
-	if b, err := os.ReadFile(path); err == nil {
+	b, err := os.ReadFile(path)
+	if err == nil {
 		if err := json.Unmarshal(b, &s.data); err != nil {
 			return nil, err
 		}
@@ -85,11 +86,13 @@ func (s *StatsStore) AddMoment() error {
 }
 
 func (s *StatsStore) Snapshot() Statistics {
-	s.mu.Lock(); defer s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := s.data
 	out.ByReason = cloneReason(s.data.ByReason)
 	out.ByStreamer = cloneString(s.data.ByStreamer)
 	out.ByDay = cloneString(s.data.ByDay)
+	out.Events = append([]PointEvent(nil), s.data.Events...)
 	return out
 }
 
