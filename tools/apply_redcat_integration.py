@@ -31,16 +31,17 @@ replace(
 replace(
     miner,
     '\truntime *runtimecfg.Twitch\n',
-    '\truntime *runtimecfg.Twitch\n\n\tredcatShutdown *redcat.RaidShutdownManager\n',
+    '\truntime *runtimecfg.Twitch\n\n\tredcatShutdown *redcat.RaidShutdownManager\n\tredcatStats    *redcat.StatsStore\n',
 )
 replace(
     miner,
-    '\tparentCtx := ctx\n\tg, ctx := errgroup.WithContext(ctx)\n',
+    '''\tparentCtx := ctx
+\tg, ctx := errgroup.WithContext(ctx)
+''',
     '''\tparentCtx := ctx
 
-	// RedCat owns a child of the miner context. When the raid shutdown
-	// condition is satisfied it cancels this child, allowing the existing
-	// errgroup-based lifecycle to stop all background workers cleanly.
+	// RedCat uses a child context so its delayed raid shutdown participates in
+	// the existing errgroup lifecycle instead of terminating the process.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -59,58 +60,84 @@ replace(
 		runCancel,
 	)
 
+	var statsErr error
+	m.redcatStats, statsErr = redcat.NewStatsStore("data/redcat/statistics.json")
+	if statsErr != nil {
+		m.log.Warn("Failed to initialize RedCat statistics", "error", statsErr)
+	}
+
 	g, ctx := errgroup.WithContext(runCtx)
 ''',
 )
 replace(
-    miner,
-    '\t\t\tstreamer.Mu.RUnlock()\n\n\t\t\tmu.Lock()\n',
-    '''\t\t\tstreamer.Mu.RUnlock()
-
-			if m.redcatShutdown != nil {
-				if isOnline {
-					m.redcatShutdown.OnStreamerOnline(streamer.Username)
-				} else {
-					m.redcatShutdown.OnStreamerOffline(streamer.Username)
-				}
-			}
-
-		\tmu.Lock()
-''',
-)
-replace(
     handler,
-    '\t\t\tevent := mapReasonToEvent(reasonCode)\n\t\t\tm.log.Event(ctx, event,\n',
     '''\t\t\tevent := mapReasonToEvent(reasonCode)
-		if event == model.EventGainForRaid && m.redcatShutdown != nil {
-			m.redcatShutdown.OnRaidPointsReceived()
-		}
-		m.log.Event(ctx, event,
+\t\t\tif event == model.EventGainForRaid && m.redcatShutdown != nil {
+\t\t\t\tm.redcatShutdown.OnRaidPointsReceived()
+\t\t\t}
+\t\t\tm.log.Event(ctx, event,
+''',
+    '''\t\t\tevent := mapReasonToEvent(reasonCode)
+\t\t\tif m.redcatStats != nil {
+\t\t\t\tvar reason redcat.PointReason
+\t\t\t\tswitch event {
+\t\t\t\tcase model.EventGainForWatch:
+\t\t\t\t\treason = redcat.PointWatch
+\t\t\t\tcase model.EventGainForClaim:
+\t\t\t\t\treason = redcat.PointClaim
+\t\t\t\tcase model.EventGainForWatchStreak:
+\t\t\t\t\treason = redcat.PointWatchStreak
+\t\t\t\tcase model.EventGainForRaid:
+\t\t\t\t\treason = redcat.PointRaid
+\t\t\t\t}
+\t\t\t\tif err := m.redcatStats.AddPoints(streamer.Username, reason, earned, time.Now()); err != nil {
+\t\t\t\t\tm.log.Warn("Failed to save RedCat point statistics", "error", err)
+\t\t\t\t}
+\t\t\t}
+\t\t\tif event == model.EventGainForRaid && m.redcatShutdown != nil {
+\t\t\t\tm.redcatShutdown.OnRaidPointsReceived()
+\t\t\t}
+\t\t\tm.log.Event(ctx, event,
 ''',
 )
 replace(
     handler,
-    '\t\t"category", category)\n\n\tm.updateChatPresence(streamer, true)\n',
-    '''\t\t"category", category)
-
-	if m.redcatShutdown != nil {
-		m.redcatShutdown.OnStreamerOnline(username)
-	}
-
-	m.updateChatPresence(streamer, true)
+    '''\tif err := m.twitch.ClaimMoment(ctx, momentID); err != nil {
+\t\tm.log.Warn("Failed to claim moment",
+\t\t\t"streamer", username, "moment_id", momentID, "error", err)
+\t}
+''',
+    '''\tif err := m.twitch.ClaimMoment(ctx, momentID); err != nil {
+\t\tm.log.Warn("Failed to claim moment",
+\t\t\t"streamer", username, "moment_id", momentID, "error", err)
+\t} else if m.redcatStats != nil {
+\t\tif err := m.redcatStats.AddMoment(); err != nil {
+\t\t\tm.log.Warn("Failed to save RedCat moment statistics", "error", err)
+\t\t}
+\t}
 ''',
 )
 replace(
     handler,
-    '\t}\n\n\tm.updateChatPresence(streamer, false)\n',
-    '''\t}
-
-	if m.redcatShutdown != nil {
-		m.redcatShutdown.OnStreamerOffline(username)
-	}
-
-	m.updateChatPresence(streamer, false)
+    '''\tif err := m.twitch.JoinRaid(ctx, raidID); err != nil {
+\t\tm.log.Warn("Failed to join raid",
+\t\t\t"streamer", username, "raid_id", raidID, "error", err)
+\t}
 ''',
+    '''\tif err := m.twitch.JoinRaid(ctx, raidID); err != nil {
+\t\tm.log.Warn("Failed to join raid",
+\t\t\t"streamer", username, "raid_id", raidID, "error", err)
+\t} else if m.redcatStats != nil {
+\t\tif err := m.redcatStats.AddRaid(); err != nil {
+\t\t\tm.log.Warn("Failed to save RedCat raid statistics", "error", err)
+\t\t}
+\t}
+''',
+)
+replace(
+    handler,
+    '''\t"github.com/Guliveer/twitch-miner-go/internal/model"\n''',
+    '''\t"github.com/Guliveer/twitch-miner-go/internal/model"\n\t"github.com/Guliveer/twitch-miner-go/internal/redcat"\n''',
 )
 
 print("RedCat integration applied successfully.")
