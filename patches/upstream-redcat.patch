@@ -31,10 +31,7 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 +	})
 +
 +	g, ctx := errgroup.WithContext(runCtx)
-@@ -321,6 +339,11 @@ func (m *Miner) checkAllStreamersOnline(ctx context.Context) {
- 			streamer.Mu.RLock()
- 			isOnline := streamer.IsOnline
-@@
+@@ -321,6 +339,13 @@ func (m *Miner) checkAllStreamersOnline(ctx context.Context) {
  			streamer.Mu.RUnlock()
 +
 +			if m.redcatShutdown != nil {
@@ -49,26 +46,25 @@ diff --git a/internal/miner/miner.go b/internal/miner/miner.go
 diff --git a/internal/miner/handler.go b/internal/miner/handler.go
 --- a/internal/miner/handler.go
 +++ b/internal/miner/handler.go
-@@ -81,6 +81,10 @@ func (m *Miner) handlePointsEarnedOrSpent(ctx context.Context, msg *model.Message, streamer *model.Streamer) {
+@@ -81,6 +81,11 @@ func (m *Miner) handlePointsEarnedOrSpent(ctx context.Context, msg *model.Message, streamer *model.Streamer) {
  			event := mapReasonToEvent(reasonCode)
 +			if event == model.EventGainForRaid && m.redcatShutdown != nil {
 +				m.redcatShutdown.OnRaidPointsReceived(func() {
 +					m.log.Info("🛑 RedCat raid shutdown condition satisfied")
-+					// The Run() context is cancelled by the integration callback.
++					runCancel := m.redcatRunCancel
++					if runCancel != nil {
++						runCancel()
++					}
 +				})
 +			}
  			m.log.Event(ctx, event,
-@@ -142,6 +146,10 @@ func (m *Miner) handleStreamUp(ctx context.Context, streamer *model.Streamer) {
- 	m.log.Event(ctx, model.EventStreamerOnline,
-@@
+@@ -142,6 +147,10 @@ func (m *Miner) handleStreamUp(ctx context.Context, streamer *model.Streamer) {
  		"category", category)
 +
 +	if m.redcatShutdown != nil {
 +		m.redcatShutdown.OnStreamerOnline(username)
 +	}
-@@ -158,6 +166,10 @@ func (m *Miner) handleStreamDown(ctx context.Context, streamer *model.Streamer) {
- 	if wasOnline {
-@@
+@@ -158,6 +167,10 @@ func (m *Miner) handleStreamDown(ctx context.Context, streamer *model.Streamer) {
  			"category", category)
  	}
 +
