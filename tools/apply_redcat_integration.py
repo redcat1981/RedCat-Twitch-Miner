@@ -7,7 +7,7 @@ UPSTREAM = ROOT / "upstream"
 def replace(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     if old not in text:
-        raise SystemExit(f"Integration anchor not found: {path}: {old[:80]!r}")
+        raise SystemExit(f"Integration anchor not found: {path}: {old[:100]!r}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
@@ -31,32 +31,86 @@ replace(
 replace(
     miner,
     '\truntime *runtimecfg.Twitch\n',
-    '\truntime *runtimecfg.Twitch\n\n\tredcatShutdown *redcat.RaidShutdownManager\n\tredcatRunCancel context.CancelFunc\n',
+    '\truntime *runtimecfg.Twitch\n\n\tredcatShutdown *redcat.RaidShutdownManager\n',
 )
 replace(
     miner,
     '\tparentCtx := ctx\n\tg, ctx := errgroup.WithContext(ctx)\n',
-    '''\tparentCtx := ctx\n\n\t// RedCat integration uses a parent cancellation context so a requested\n\t// graceful shutdown can terminate the same errgroup used by the miner.\n\trunCtx, runCancel := context.WithCancel(ctx)\n\tm.redcatRunCancel = runCancel\n\tdefer func() {\n\t\tm.redcatRunCancel = nil\n\t\trunCancel()\n\t}()\n\n\tredcatTargets := make([]string, 0, len(m.getStreamers()))\n\tfor _, s := range m.getStreamers() {\n\t\tredcatTargets = append(redcatTargets, s.Username)\n\t}\n\tm.redcatShutdown = redcat.NewRaidShutdownManager(redcatTargets, redcat.RaidShutdownConfig{\n\t\tEnabled:                         true,\n\t\tOnlyAfterRaid:                   true,\n\t\tGracePeriod:                     60 * time.Second,\n\t\tRequireAllTargetChannelsOffline: true,\n\t})\n\n\tg, ctx := errgroup.WithContext(runCtx)\n''',
+    '''\tparentCtx := ctx
+
+	// RedCat owns a child of the miner context. When the raid shutdown
+	// condition is satisfied it cancels this child, allowing the existing
+	// errgroup-based lifecycle to stop all background workers cleanly.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	redcatTargets := make([]string, 0, len(m.getStreamers()))
+	for _, s := range m.getStreamers() {
+		redcatTargets = append(redcatTargets, s.Username)
+	}
+	m.redcatShutdown = redcat.NewRaidShutdownManager(
+		redcatTargets,
+		redcat.RaidShutdownConfig{
+			Enabled:                         true,
+			OnlyAfterRaid:                   true,
+			GracePeriod:                     60 * time.Second,
+			RequireAllTargetChannelsOffline: true,
+		},
+		runCancel,
+	)
+
+	g, ctx := errgroup.WithContext(runCtx)
+''',
 )
 replace(
     miner,
     '\t\t\tstreamer.Mu.RUnlock()\n\n\t\t\tmu.Lock()\n',
-    '''\t\t\tstreamer.Mu.RUnlock()\n\n\t\t\tif m.redcatShutdown != nil {\n\t\t\t\tif isOnline {\n\t\t\t\t\tm.redcatShutdown.OnStreamerOnline(streamer.Username)\n\t\t\t\t} else {\n\t\t\t\t\tm.redcatShutdown.OnStreamerOffline(streamer.Username)\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tmu.Lock()\n''',
+    '''\t\t\tstreamer.Mu.RUnlock()
+
+			if m.redcatShutdown != nil {
+				if isOnline {
+					m.redcatShutdown.OnStreamerOnline(streamer.Username)
+				} else {
+					m.redcatShutdown.OnStreamerOffline(streamer.Username)
+				}
+			}
+
+		\tmu.Lock()
+''',
 )
 replace(
     handler,
     '\t\t\tevent := mapReasonToEvent(reasonCode)\n\t\t\tm.log.Event(ctx, event,\n',
-    '''\t\t\tevent := mapReasonToEvent(reasonCode)\n\t\t\tif event == model.EventGainForRaid && m.redcatShutdown != nil {\n\t\t\t\tm.redcatShutdown.OnRaidPointsReceived(func() {\n\t\t\t\t\tm.log.Info("🛑 RedCat raid shutdown condition satisfied")\n\t\t\t\t\tif m.redcatRunCancel != nil {\n\t\t\t\t\t\tm.redcatRunCancel()\n\t\t\t\t\t}\n\t\t\t\t})\n\t\t\t}\n\t\t\tm.log.Event(ctx, event,\n''',
+    '''\t\t\tevent := mapReasonToEvent(reasonCode)
+		if event == model.EventGainForRaid && m.redcatShutdown != nil {
+			m.redcatShutdown.OnRaidPointsReceived()
+		}
+		m.log.Event(ctx, event,
+''',
 )
 replace(
     handler,
     '\t\t"category", category)\n\n\tm.updateChatPresence(streamer, true)\n',
-    '''\t\t"category", category)\n\n\tif m.redcatShutdown != nil {\n\t\tm.redcatShutdown.OnStreamerOnline(username)\n\t}\n\n\tm.updateChatPresence(streamer, true)\n''',
+    '''\t\t"category", category)
+
+	if m.redcatShutdown != nil {
+		m.redcatShutdown.OnStreamerOnline(username)
+	}
+
+	m.updateChatPresence(streamer, true)
+''',
 )
 replace(
     handler,
     '\t}\n\n\tm.updateChatPresence(streamer, false)\n',
-    '''\t}\n\n\tif m.redcatShutdown != nil {\n\t\tm.redcatShutdown.OnStreamerOffline(username)\n\t}\n\n\tm.updateChatPresence(streamer, false)\n''',
+    '''\t}
+
+	if m.redcatShutdown != nil {
+		m.redcatShutdown.OnStreamerOffline(username)
+	}
+
+	m.updateChatPresence(streamer, false)
+''',
 )
 
 print("RedCat integration applied successfully.")
