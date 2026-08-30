@@ -23,6 +23,14 @@ Disabled:
 - Community Goals
 - Followers mode
 
+## Graceful manual shutdown
+
+Do **not** close the console window with the `X` button while the miner is running.
+
+To stop the miner correctly, press **Ctrl+C** in its console window. The upstream application already handles `SIGINT`/`SIGTERM`: it cancels the main context, stops the managed miners and waits through the normal cleanup path. A 30-second safety timeout forces exit only if graceful shutdown gets stuck.
+
+The RedCat raid shutdown uses the same context-based lifecycle, so automatic shutdown after a completed raid follows the same cleanup path.
+
 ## RedCat raid shutdown
 
 After Twitch actually awards raid points (`GAIN_FOR_RAID`), RedCat starts a 60-second grace period. The miner shuts down gracefully only if both target channels remain offline when the grace period expires.
@@ -48,4 +56,4 @@ GitHub Actions performs the same reproducible build and uploads a Windows x64 ar
 
 ## Current stage
 
-The raid-shutdown lifecycle integration is implemented. Point statistics are the next module: we will consume the upstream point-reason events (`WATCH`, `CLAIM`, `WATCH_STREAK`, `RAID`) and persist RedCat session/daily/channel totals without duplicating Twitch protocol handling.
+The raid-shutdown lifecycle integration and point statistics module are implemented. Statistics consume the upstream point-reason events (`WATCH`, `CLAIM`, `WATCH_STREAK`, `RAID`) and persist RedCat totals without duplicating Twitch protocol handling.
