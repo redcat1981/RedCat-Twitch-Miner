@@ -57,3 +57,5 @@ GitHub Actions performs the same reproducible build and uploads a Windows x64 ar
 ## Current stage
 
 The raid-shutdown lifecycle integration and point statistics module are implemented. Statistics consume the upstream point-reason events (`WATCH`, `CLAIM`, `WATCH_STREAK`, `RAID`) and persist RedCat totals without duplicating Twitch protocol handling.
+
+> Windows test build: dashboard/statistics integration verification.
